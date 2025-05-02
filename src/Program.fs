@@ -116,6 +116,8 @@ let rec internal interpret (opt: CmdLine.InterpreterOptions): int =
 
 /// Auxiliary function that attempts to compile the assembly code in the fiven
 /// filename, and returns Ok (with the compiled assembly code) or Error.
+/// Auxiliary function that attempts to compile the assembly code in the fiven
+/// filename, and returns Ok (with the compiled assembly code) or Error.
 let internal generateAsm (filename: string)
                          (anf: bool) (maxRegisters: uint)
                          (optimize: uint): Result<RISCV.Asm, unit> =
@@ -132,10 +134,19 @@ let internal generateAsm (filename: string)
             Error()
         | Ok(tast) ->
             Log.info "Type checking succeeded."
+            
+            // Apply partial evaluation optimization if requested (level 2)
+            let tast2 = 
+                if (optimize = 2u) then
+                    Log.info "Applying partial evaluation optimizations"
+                    PartialEval.optimize tast
+                else
+                    tast
+            
             let asm =
                 if (anf) then
                     Log.debug $"Transforming AST into ANF"
-                    let anf = ANF.transform tast
+                    let anf = ANF.transform tast2  // 注意这里使用tast2
                     let registers =
                         if (maxRegisters >= 3u) && (maxRegisters <= 18u) then
                             maxRegisters
@@ -145,9 +156,10 @@ let internal generateAsm (filename: string)
                             failwith $"The number of registers must be between 3 and 18 (got %d{maxRegisters} instead)"
                     ANFRISCVCodegen.codegen anf registers
                 else
-                    RISCVCodegen.codegen tast
+                    RISCVCodegen.codegen tast2  // 注意这里使用tast2
+            
             /// Assembly code after optimization (if enabled)
-            let asm2 = if (optimize >= 1u)
+            let asm2 = if (optimize = 1u)
                            then Peephole.optimize asm
                            else asm
             Ok(asm2)
@@ -175,6 +187,8 @@ let internal compile (opt: CmdLine.CompilerOptions): int =
             0 // Success!
     | Error() ->
         1 // Non-zero exit code
+    
+
 
 
 /// Compile and launch RARS with the compilation result, using the given

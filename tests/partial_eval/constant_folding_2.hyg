@@ -1,0 +1,4 @@
+let x = 1 + 2 + 3;
+let y = 2 * 3 + 4;
+let z = (5 + 3) * 2;
+println(x + y + z)
