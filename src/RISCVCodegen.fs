@@ -26,6 +26,9 @@ type internal Storage =
     /// The variable is stored in memory, in a location marked with a
     /// label in the compiled assembly code.
     | Label of label: string
+    /// This variable is stored on the stack, at the given offset (in bytes)
+    /// from the memory address contained in the frame pointer (fp) register.
+    | Frame of offset: int
 
 
 /// Code generation environment.
@@ -88,6 +91,12 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                        $"Load value of variable '%s{name}'")
                       (RV.FMV_W_X(FPReg.r(env.FPTarget), Reg.r(env.Target)),
                        $"Transfer '%s{name}' to fp register") ])
+            | Some(Storage.Frame(offset)) ->
+                // Load a float variable from the stack at fp+offset
+                Asm([ (RV.LW(Reg.r(env.Target), Imm12(offset), Reg.fp),
+                       $"Load stack variable '%s{name}' from fp+%d{offset}")
+                      (RV.FMV_W_X(FPReg.r(env.FPTarget), Reg.r(env.Target)),
+                       $"Transfer '%s{name}' to fp register") ])
             | Some(Storage.Reg(_)) as st ->
                 failwith $"BUG: variable %s{name} of type %O{t} has unexpected storage %O{st}"
             | None -> failwith $"BUG: float variable without storage: %s{name}"
@@ -105,6 +114,10 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                                $"Load address of variable '%s{name}'")
                               (RV.LW(Reg.r(env.Target), Imm12(0), Reg.r(env.Target)),
                                $"Load value of variable '%s{name}'") ])
+            | Some(Storage.Frame(offset)) ->
+                // Load a variable from the stack at fp+offset
+                Asm(RV.LW(Reg.r(env.Target), Imm12(offset), Reg.fp),
+            $"Load stack variable '%s{name}' from fp+%d{offset}")
             | Some(Storage.FPReg(_)) as st ->
                 failwith $"BUG: variable %s{name} of type %O{t} has unexpected storage %O{st}"
             | None -> failwith $"BUG: variable without storage: %s{name}"
@@ -651,16 +664,46 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         /// copying the contents of the target registers used by 'compileArgs'
         /// and 'argsCode' above.  To this end, this code folds over the indexes
         /// of all arguments (from 0 to args.Length), using 'copyArg' above.
-        let argsLoadCode = List.fold copyArg (Asm()) [0..(args.Length-1)]
+        /// Function that stores extra arguments (beyond the 8th) on the stack
+        let storeExtraArg (acc: Asm) (i: int) =
+            // Each argument takes 4 bytes (a word in RISC-V)
+            // We start storing at sp+0 and work up
+            acc.AddText(RV.SW(Reg.r(env.Target + (uint i) + 1u), Imm12((i - 8) * 4), Reg.sp),
+                        $"Store extra function call argument %d{i+1} at sp+%d{(i - 8) * 4}")
+
+        /// Code that loads the first 8 application arguments (if available) into registers 'a'
+        let regArgsCount = min 8 args.Length
+        let argsLoadCode = List.fold copyArg (Asm()) [0..(regArgsCount-1)]
+
+        /// Code that stores extra arguments (beyond the 8th) on the stack
+        let extraArgsCount = max 0 (args.Length - 8)
+        let stackArgsStoreCode = 
+            if extraArgsCount > 0 then
+                // Adjust stack pointer to make room for extra arguments
+                Asm(RV.ADDI(Reg.sp, Reg.sp, Imm12(-4 * extraArgsCount)),
+                    $"Adjust stack pointer for %d{extraArgsCount} extra arguments")
+                ++ (List.fold storeExtraArg (Asm()) [8..(args.Length-1)])
+            else
+                Asm() // No extra arguments to store
 
         /// Code that performs the function call
         let callCode =
             appTermCode
             ++ argsCode // Code to compute each argument of the function call
-               .AddText(RV.COMMENT("Before function call: save caller-saved registers"))
-               ++ (saveRegisters saveRegs [])
-               ++ argsLoadCode // Code to load arg values into arg registers
-                  .AddText(RV.JALR(Reg.ra, Imm12(0), Reg.r(env.Target)), "Function call")
+                .AddText(RV.COMMENT("Before function call: save caller-saved registers"))
+                ++ (saveRegisters saveRegs [])
+                ++ stackArgsStoreCode // Store extra arguments on stack if needed
+                ++ argsLoadCode // Code to load arg values into arg registers
+                    .AddText(RV.JALR(Reg.ra, Imm12(0), Reg.r(env.Target)), "Function call")
+
+        /// Code to restore stack pointer if extra arguments were pushed
+        let stackRestoreCode =
+            if extraArgsCount > 0 then
+                Asm(RV.ADDI(Reg.sp, Reg.sp, Imm12(4 * extraArgsCount)),
+                    "Restore stack pointer after function call")
+            else
+                Asm() // No stack adjustment needed
+
 
         /// Code that handles the function return value (if any)
         let retCode =
@@ -670,9 +713,10 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         // Put everything together, and restore the caller-saved registers
         callCode
             .AddText(RV.COMMENT("After function call"))
+            ++ stackRestoreCode // Restore stack pointer if needed
             ++ retCode
             .AddText(RV.COMMENT("Restore caller-saved registers"))
-                  ++ (restoreRegisters saveRegs [])
+                ++ (restoreRegisters saveRegs [])
 
     | StructCons(fields) ->
         // To compile a structure constructor, we allocate heap space for the
@@ -839,7 +883,13 @@ and internal compileFunction (args: List<string * Type>)
     /// it assigns an 'a' register to each function argument, and accumulates
     /// the result in a mapping (that will be used as env.VarStorage)
     let folder (acc: Map<string, Storage>) (i, (var, _tpe)) =
-        acc.Add(var, Storage.Reg(Reg.a((uint)i)))
+        if i < 8 then
+            // First 8 args use registers a0-a7
+            acc.Add(var, Storage.Reg(Reg.a((uint)i)))
+        else
+            // Args beyond 8 use stack locations relative to fp
+            // Each parameter is 4 bytes (a word in RISC-V)
+            acc.Add(var, Storage.Frame((i-8)*4))
     /// Updated storage information including function arguments
     let varStorage2 = List.fold folder env.VarStorage indexedArgs
 
