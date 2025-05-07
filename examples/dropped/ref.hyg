@@ -1,0 +1,2 @@
+let x: ref {int} = ref {42};
+assert(x.value = 42)

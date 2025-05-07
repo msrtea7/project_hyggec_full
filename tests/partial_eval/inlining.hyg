@@ -1,0 +1,6 @@
+fun add(x: int, y: int): int = x + y;
+
+let a = 20;
+let b = 2;
+let res = add(a * 2, b);
+println(res)
