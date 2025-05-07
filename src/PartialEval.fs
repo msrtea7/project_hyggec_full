@@ -7,6 +7,37 @@ open AST
 /// Environment tracking known constant values of variables
 type ConstEnv<'E,'T> = Map<string, Node<'E,'T>>
 
+/// Recursively checks if the AST node or any of its subexpressions contains a Pointer
+let rec containsPointer (node: Node<'E,'T>) : bool =
+    match node.Expr with
+    | Pointer(_) -> true
+    | Add(lhs, rhs) -> containsPointer lhs || containsPointer rhs
+    | Mult(lhs, rhs) -> containsPointer lhs || containsPointer rhs
+    | And(lhs, rhs) -> containsPointer lhs || containsPointer rhs
+    | Or(lhs, rhs) -> containsPointer lhs || containsPointer rhs
+    | Not(arg) -> containsPointer arg
+    | Eq(lhs, rhs) -> containsPointer lhs || containsPointer rhs
+    | Less(lhs, rhs) -> containsPointer lhs || containsPointer rhs
+    | If(cond, ifTrue, ifFalse) -> 
+        containsPointer cond || containsPointer ifTrue || containsPointer ifFalse
+    | Let(_, init, body) -> containsPointer init || containsPointer body
+    | LetT(_, _, init, body) -> containsPointer init || containsPointer body
+    | LetMut(_, init, body) -> containsPointer init || containsPointer body
+    | Assign(target, expr) -> containsPointer target || containsPointer expr
+    | Seq(nodes) -> List.exists containsPointer nodes
+    | Application(expr, args) -> 
+        containsPointer expr || List.exists containsPointer args
+    | Type(_, _, scope) -> containsPointer scope
+    | Ascription(_, arg) -> containsPointer arg
+    | Assertion(arg) -> containsPointer arg
+    | StructCons(fields) -> List.exists (snd >> containsPointer) fields
+    | FieldSelect(target, _) -> containsPointer target
+    | UnionCons(_, expr) -> containsPointer expr
+    | Match(expr, cases) -> 
+        containsPointer expr || 
+        List.exists (fun (_, _, cont) -> containsPointer cont) cases
+    | _ -> false
+
 /// Checks if a node represents a constant value
 let isConstant (node: Node<'E,'T>) : bool =
     match node.Expr with
@@ -15,7 +46,7 @@ let isConstant (node: Node<'E,'T>) : bool =
 
 /// Optimize AST by applying partial evaluation
 let optimize (ast: AST.Node<'E,'T>): AST.Node<'E,'T> =
-    Log.info "Applying partial evaluation (constant folding and propagation)"
+    Log.info "Applying partial evaluation (constant folding and propagation with pointer handling)"
     
     // Create a special runtime environment for partial evaluation
     // Notice Reader and Printer are None to prevent reducing I/O operations
@@ -27,9 +58,33 @@ let optimize (ast: AST.Node<'E,'T>): AST.Node<'E,'T> =
         Interpreter.PtrInfo = Map[] 
     }
     
+    /// Try to apply constant folding using the interpreter while handling pointers
+    let rec tryConstantFold (node: AST.Node<'E,'T>) : Option<AST.Node<'E,'T>> =
+        // Skip folding for nodes that already represent values
+        if Interpreter.isValue node then None
+        else
+            // First, reduce the node as much as possible and collect all intermediate states
+            // This function builds a history from newest (head) to oldest (tail)
+            let rec reduceSteps (current: AST.Node<'E,'T>) (history: List<AST.Node<'E,'T>>) =
+                match Interpreter.reduce env current with
+                | Some(envNew, reduced) ->
+                    // Add current reduced node to history and continue reducing
+                    reduceSteps reduced (reduced :: history)
+                | None ->
+                    // Can't reduce further - return history
+                    history
+            
+            // Start with the original node in the history
+            let history = reduceSteps node [node]
+            
+            // Check nodes from newest to oldest (first to last in the list)
+            match history |> List.tryFind (fun n -> not (containsPointer n)) with
+            | Some node -> Some node  // Found a node without pointers
+            | None -> None  // All nodes contain pointers
+    
     // Recursive function to optimize a node and its subexpressions
     // with both constant folding and propagation
-    let rec optimizeNode (constEnv: ConstEnv<'E,'T>) (node: AST.Node<'E,'T>) : AST.Node<'E,'T> =
+    and optimizeNode (constEnv: ConstEnv<'E,'T>) (node: AST.Node<'E,'T>) : AST.Node<'E,'T> =
         // Try to apply constant folding first
         match tryConstantFold node with
         | Some result -> result
@@ -196,19 +251,29 @@ let optimize (ast: AST.Node<'E,'T>): AST.Node<'E,'T> =
             // For all other node types, keep them as is
             | _ -> node
     
-    // Try to apply constant folding using the interpreter
-    and tryConstantFold (node: AST.Node<'E,'T>) : Option<AST.Node<'E,'T>> =
+    /// Try to apply constant folding using the interpreter while handling pointers
+    let tryConstantFold (node: AST.Node<'E,'T>) : Option<AST.Node<'E,'T>> =
         // Skip folding for nodes that already represent values
         if Interpreter.isValue node then None
         else
-            // Try to reduce the node using the interpreter
-            match Interpreter.reduce env node with
-            | Some(_, reduced) ->
-                // Successfully reduced - try to reduce further
-                match tryConstantFold reduced with
-                | Some furtherReduced -> Some furtherReduced
-                | None -> Some reduced
-            | None -> None
+            // First, reduce the node as much as possible and collect all intermediate states
+            // This function builds a history from newest (head) to oldest (tail)
+            let rec reduceSteps (current: AST.Node<'E,'T>) (history: List<AST.Node<'E,'T>>) =
+                match Interpreter.reduce env current with
+                | Some(_, reduced) ->
+                    // Add current reduced node to history and continue reducing
+                    reduceSteps reduced (reduced :: history)
+                | None ->
+                    // Can't reduce further - return history
+                    history
+            
+            // Start with the original node in the history
+            let history = reduceSteps node [node]
+            
+            // Check nodes from newest to oldest (first to last in the list)
+            match history |> List.tryFind (fun n -> not (containsPointer n)) with
+            | Some node -> Some node  // Found a node without pointers
+            | None -> None  // All nodes contain pointers
     
     // Start optimization from the root node with empty constant environment
     optimizeNode Map.empty ast

@@ -528,6 +528,15 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                                           (RV.SW(Reg.r(env.Target), Imm12(0),
                                                  Reg.r(env.Target + 1u)),
                                            $"Transfer value of '%s{name}' to memory") ])
+                // Add this new case to handle Frame storage
+                | Some(Storage.Frame(offset)) ->
+                    match rhs.Type with
+                    | t when (isSubtypeOf rhs.Env t TFloat) ->
+                        rhsCode.AddText(RV.FSW_S(FPReg.r(env.FPTarget), Imm12(offset), Reg.fp),
+                                    $"Assignment to stack variable %s{name} at fp+%d{offset}")
+                    | _ ->
+                        rhsCode.AddText(RV.SW(Reg.r(env.Target), Imm12(offset), Reg.fp),
+                                    $"Assignment to stack variable %s{name} at fp+%d{offset}")
                 | None -> failwith $"BUG: variable without storage: %s{name}"
         | FieldSelect(target, field) ->
             /// Assembly code for computing the 'target' object of which we are
@@ -807,7 +816,8 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
 
         // Put everything together: compile the target, access the field
         selTargetCode ++ fieldAccessCode
-
+    | Match(expr, cases) ->
+        failwith "Match expressions are not supported in the current version of the compiler"
     | Pointer(_) ->
         failwith "BUG: pointers cannot be compiled (by design!)"
 
