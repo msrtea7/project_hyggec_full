@@ -254,6 +254,16 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                               + $"found %O{targ.Type}")])
         | Error(es) -> Error(es)
 
+    | Copy(arg) ->
+        match (typer env arg) with
+        | Ok(targ) ->
+            match (expandType env targ.Type) with
+            | TStruct(_) ->
+                Ok { Pos = node.Pos; Env = env; Type = targ.Type; Expr = Copy(targ) }
+            | _ ->
+                Error([(node.Pos, $"copy operation: expected argument of struct type, found %O{targ.Type}")])
+        | Error(es) -> Error(es)
+
     | Eq(lhs, rhs) ->
         match (numericalRelationTyper "equal to" node.Pos env lhs rhs) with
         | Ok(tlhs, trhs) ->
@@ -434,6 +444,21 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                               + $"found %O{tcond.Type}") :: es)
         | Error(es), Ok(_) -> Error(es)
         | Error(esCond), Error(esBody) -> Error(esCond @ esBody)
+
+    //dowhile
+    | DoWhile(body, cond) ->
+        match ((typer env body), (typer env cond)) with
+        | (Ok(tbody), Ok(tcond)) when (isSubtypeOf env tcond.Type TBool) ->
+            Ok { Pos = node.Pos; Env = env; Type = TUnit; Expr = DoWhile(tbody, tcond)}
+        | (Ok(_), Ok(tcond)) ->
+            Error([(tcond.Pos, $"'do-while' condition: expected type %O{TBool}, "
+                             + $"found %O{tcond.Type}")])
+        | Ok(_), Error(es) ->
+            Error(es)
+        | Error(es), Ok(_) -> 
+            Error(es)
+        | Error(esBody), Error(esCond) -> 
+            Error(esBody @ esCond)
 
     | Lambda(args, body) ->
         let (argNames, argPretypes) = List.unzip args

@@ -1,0 +1,15 @@
+let mutable x = 0;
+(2*2=6) && (if true then { x <- x + 1; false } else true);
+assert(x = 0);
+
+let mutable y = 0;
+(2*2=4) || (if true then { y <- y + 1; false } else true);
+assert(y = 0);
+
+let mutable z = 0;
+(2*2=6) || (if true then { z <- z + 1; false } else true);
+assert(z = 1);
+
+let mutable w = 0;
+(2*2=4) && (if true then { w <- w + 1; false } else true);
+assert(w = 1)

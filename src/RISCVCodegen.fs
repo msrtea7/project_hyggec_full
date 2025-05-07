@@ -186,6 +186,58 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         let asm = doCodegen env arg
         asm.AddText(RV.SEQZ(Reg.r(env.Target), Reg.r(env.Target)))
 
+//copy
+    | Copy(arg) ->
+    // 首先生成用于计算参数的代码（应该是一个结构体地址）
+        let argCode = doCodegen env arg
+    // 获取结构体类型信息来确定字段数量和布局
+        match (expandType arg.Env arg.Type) with
+        | TStruct(fields) ->
+            let fieldCount = fields.Length
+        // 第一步：分配新的堆内存空间给复制的结构体
+            let structAllocCode =
+                (beforeSysCall [Reg.a0] [])
+                    .AddText([
+                        (RV.LI(Reg.a0, fieldCount * 4),
+                         "为结构体副本分配内存空间（以字节计）")
+                        (RV.LI(Reg.a7, 9), "RARS syscall: Sbrk")
+                        (RV.ECALL, "")
+                        (RV.MV(Reg.r(env.Target + 1u), Reg.a0),
+                         "将系统调用结果（结构体内存地址）保存到临时寄存器")
+                    ])
+                    ++ (afterSysCall [Reg.a0] [])
+        // 第二步：为每个字段生成复制代码
+            let copyFieldsCode = 
+            // 使用循环生成代码复制每个字段
+                let mutable copyCode = Asm()
+                for i in 0 .. (fieldCount - 1) do
+                    let fieldType = snd fields.[i]
+                    if isSubtypeOf arg.Env fieldType TFloat then
+                    // 浮点字段
+                        copyCode <- copyCode.AddText([
+                            (RV.FLW_S(FPReg.r(env.FPTarget), Imm12(i * 4), Reg.r(env.Target)),
+                             $"从源结构体加载第 %d{i} 个字段（浮点型）")
+                            (RV.FSW_S(FPReg.r(env.FPTarget), Imm12(i * 4), Reg.r(env.Target + 1u)),
+                             $"将第 %d{i} 个字段复制到目标结构体（浮点型）")
+                    ])
+                    else if not (isSubtypeOf arg.Env fieldType TUnit) then
+                    // 整数及其他类型字段
+                        copyCode <- copyCode.AddText([
+                            (RV.LW(Reg.r(env.Target + 2u), Imm12(i * 4), Reg.r(env.Target)),
+                             $"从源结构体加载第 %d{i} 个字段")
+                            (RV.SW(Reg.r(env.Target + 2u), Imm12(i * 4), Reg.r(env.Target + 1u)),
+                             $"将第 %d{i} 个字段复制到目标结构体")
+                        ])
+                copyCode
+        // 最后一步：将目标结构体地址移动到目标寄存器
+            let finalCode = 
+                Asm(RV.MV(Reg.r(env.Target), Reg.r(env.Target + 1u)),
+                    "将复制后的结构体地址移动到目标寄存器")
+        // 将所有代码组合在一起
+            argCode ++ structAllocCode ++ copyFieldsCode ++ finalCode
+        | t ->
+            failwith $"错误: Copy操作只能用于结构体类型 而不是: %O{t}"
+
     | Eq(lhs, rhs)
     | Less(lhs, rhs) as expr ->
         // Code generation for equality and less-than relations is very similar:
@@ -583,6 +635,26 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                  "Load address of label at the beginning of the 'while' loop")
                 (RV.JR(Reg.r(env.Target)), "Jump to the end of the loop")
                 (RV.LABEL(whileEndLabel), "")
+            ])
+
+//dowhile
+    | DoWhile(body, cond) ->
+    /// Label for the body of the do-while loop
+        let doWhileBodyLabel = Util.genSymbol "do_while_body"
+    /// Label for the condition check
+        let doWhileCondLabel = Util.genSymbol "do_while_cond"
+    /// Label for the end of the do-while loop
+        let doWhileEndLabel = Util.genSymbol "do_while_end"
+    // First execute the body, without checking the condition
+        Asm(RV.LABEL(doWhileBodyLabel), "Body of the 'do-while' loop starts here")
+            ++ (doCodegen env body)
+            .AddText(RV.LABEL(doWhileCondLabel), "Condition check for the 'do-while' loop")
+        // Then check the condition
+            ++ (doCodegen env cond)
+            .AddText([
+                (RV.BNEZ(Reg.r(env.Target), doWhileBodyLabel),
+                 "Jump back to loop body if condition is true")
+                (RV.LABEL(doWhileEndLabel), "End of the 'do-while' loop")
             ])
 
     | Lambda(args, body) ->

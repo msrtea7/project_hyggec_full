@@ -56,7 +56,9 @@ rule tokenize = parse
 | "*"          { Parser.TIMES }
 | "+"          { Parser.PLUS }
 | "and"        { Parser.AND }
-| "or"         { Parser.OR }
+| "or"         { Parser.OR } 
+| "&&"         { Parser.ANDSC }   
+| "||"         { Parser.ORSC  }
 | "not"        { Parser.NOT }
 | "="          { Parser.EQ }
 | "<"          { Parser.LT }
@@ -91,6 +93,7 @@ rule tokenize = parse
 | "union"      { Parser.UNION }
 | "match"      { Parser.MATCH }
 | "with"       { Parser.WITH }
+| "copy"       { Parser.COPY}      
 
 // Generic identifier
 | ident        { Parser.IDENT(LexBuffer<_>.LexemeString lexbuf) }
