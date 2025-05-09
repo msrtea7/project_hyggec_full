@@ -1,0 +1,7 @@
+let x = 40;
+let y = 2;
+let a = 40;
+let b = 2;
+let c = 40;
+let d = 2;
+println(x + y + a + b + c + d)
