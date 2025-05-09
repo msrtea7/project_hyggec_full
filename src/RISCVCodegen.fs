@@ -188,55 +188,91 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
 
 //copy
     | Copy(arg) ->
-    // 首先生成用于计算参数的代码（应该是一个结构体地址）
+        // Generate code to compute the argument (get the struct address)
         let argCode = doCodegen env arg
-    // 获取结构体类型信息来确定字段数量和布局
+        // Get struct type information
         match (expandType arg.Env arg.Type) with
         | TStruct(fields) ->
-            let fieldCount = fields.Length
-        // 第一步：分配新的堆内存空间给复制的结构体
-            let structAllocCode =
-                (beforeSysCall [Reg.a0] [])
-                    .AddText([
-                        (RV.LI(Reg.a0, fieldCount * 4),
-                         "为结构体副本分配内存空间（以字节计）")
-                        (RV.LI(Reg.a7, 9), "RARS syscall: Sbrk")
-                        (RV.ECALL, "")
-                        (RV.MV(Reg.r(env.Target + 1u), Reg.a0),
-                         "将系统调用结果（结构体内存地址）保存到临时寄存器")
-                    ])
-                    ++ (afterSysCall [Reg.a0] [])
-        // 第二步：为每个字段生成复制代码
-            let copyFieldsCode = 
-            // 使用循环生成代码复制每个字段
-                let mutable copyCode = Asm()
-                for i in 0 .. (fieldCount - 1) do
-                    let fieldType = snd fields.[i]
-                    if isSubtypeOf arg.Env fieldType TFloat then
-                    // 浮点字段
-                        copyCode <- copyCode.AddText([
-                            (RV.FLW_S(FPReg.r(env.FPTarget), Imm12(i * 4), Reg.r(env.Target)),
-                             $"从源结构体加载第 %d{i} 个字段（浮点型）")
-                            (RV.FSW_S(FPReg.r(env.FPTarget), Imm12(i * 4), Reg.r(env.Target + 1u)),
-                             $"将第 %d{i} 个字段复制到目标结构体（浮点型）")
-                    ])
-                    else if not (isSubtypeOf arg.Env fieldType TUnit) then
-                    // 整数及其他类型字段
-                        copyCode <- copyCode.AddText([
-                            (RV.LW(Reg.r(env.Target + 2u), Imm12(i * 4), Reg.r(env.Target)),
-                             $"从源结构体加载第 %d{i} 个字段")
-                            (RV.SW(Reg.r(env.Target + 2u), Imm12(i * 4), Reg.r(env.Target + 1u)),
-                             $"将第 %d{i} 个字段复制到目标结构体")
-                        ])
-                copyCode
-        // 最后一步：将目标结构体地址移动到目标寄存器
-            let finalCode = 
-                Asm(RV.MV(Reg.r(env.Target), Reg.r(env.Target + 1u)),
-                    "将复制后的结构体地址移动到目标寄存器")
-        // 将所有代码组合在一起
-            argCode ++ structAllocCode ++ copyFieldsCode ++ finalCode
+            // Helper function to implement recursive deep copy
+            let rec generateDeepCopyCode (sourceReg: uint) (targetReg: uint) (structType: Type) : Asm =
+                match (expandType arg.Env structType) with
+                | TStruct(nestedFields) ->
+                    let fieldCount = nestedFields.Length
+                    // Allocate memory for the new struct
+                    let allocCode =
+                        (beforeSysCall [Reg.a0] [])
+                            .AddText([
+                                (RV.LI(Reg.a0, fieldCount * 4),
+                                "Allocate memory for struct copy (in bytes)")
+                                (RV.LI(Reg.a7, 9), "RARS syscall: Sbrk")
+                                (RV.ECALL, "")
+                                (RV.MV(Reg.r(targetReg), Reg.a0),
+                                "Store new struct address")
+                            ])
+                            ++ (afterSysCall [Reg.a0] [])
+                    // Generate code to copy each field
+                    let copyFieldsCode = 
+                        let mutable code = Asm()
+                        for i in 0 .. (fieldCount - 1) do
+                            let (fieldName, fieldType) = nestedFields.[i]
+                            if isSubtypeOf arg.Env fieldType TFloat then
+                                // Copy float field
+                                code <- code.AddText([
+                                    (RV.FLW_S(FPReg.r(env.FPTarget), Imm12(i * 4), Reg.r(sourceReg)),
+                                    $"Load field {fieldName} from source struct (float)")
+                                    (RV.FSW_S(FPReg.r(env.FPTarget), Imm12(i * 4), Reg.r(targetReg)),
+                                    $"Copy field {fieldName} to target struct (float)")
+                                ])
+                            else if not (isSubtypeOf arg.Env fieldType TUnit) then
+                                match (expandType arg.Env fieldType) with
+                                | TStruct(_) ->
+                                    // Handle nested structs
+                                    let nestedSourceReg = sourceReg + 2u
+                                    let nestedTargetReg = targetReg + 3u
+                                    // Load pointer to nested struct
+                                    code <- code.AddText([
+                                        (RV.LW(Reg.r(nestedSourceReg), Imm12(i * 4), Reg.r(sourceReg)),
+                                        $"Load nested struct pointer from field {fieldName}")
+                                    ])
+                                    // Save current register state
+                                    code <- code.AddText([
+                                        (RV.SW(Reg.r(sourceReg), Imm12(-4), Reg.sp), "Save source struct address")
+                                        (RV.SW(Reg.r(targetReg), Imm12(-8), Reg.sp), "Save target struct address")
+                                        (RV.ADDI(Reg.sp, Reg.sp, Imm12(-8)), "Adjust stack pointer")
+                                    ])
+                                    // Recursively copy nested struct
+                                    code <- code ++ generateDeepCopyCode nestedSourceReg nestedTargetReg fieldType
+                                    // Restore register state
+                                    code <- code.AddText([
+                                        (RV.ADDI(Reg.sp, Reg.sp, Imm12(8)), "Restore stack pointer")
+                                        (RV.LW(Reg.r(sourceReg), Imm12(-4), Reg.sp), "Restore source struct address")
+                                        (RV.LW(Reg.r(targetReg), Imm12(-8), Reg.sp), "Restore target struct address")
+                                    ])
+                                    // Store new nested struct address in current struct
+                                    code <- code.AddText([
+                                        (RV.SW(Reg.r(nestedTargetReg), Imm12(i * 4), Reg.r(targetReg)),
+                                        $"Store new nested struct address to field {fieldName}")
+                                    ])
+                                | _ ->
+                                    // Copy regular field
+                                    code <- code.AddText([
+                                        (RV.LW(Reg.r(sourceReg + 2u), Imm12(i * 4), Reg.r(sourceReg)),
+                                        $"Load field {fieldName} from source struct")
+                                        (RV.SW(Reg.r(sourceReg + 2u), Imm12(i * 4), Reg.r(targetReg)),
+                                        $"Copy field {fieldName} to target struct")
+                                    ])
+                        code
+                    // Move result to target register
+                    let moveResultCode = 
+                        Asm(RV.MV(Reg.r(env.Target), Reg.r(targetReg)),
+                            "Move final struct address to target register")
+                    allocCode ++ copyFieldsCode ++ moveResultCode
+                | _ -> 
+                    Asm() // Not a struct type
+            // Call recursive function to generate deep copy code
+            argCode ++ generateDeepCopyCode env.Target (env.Target + 1u) arg.Type
         | t ->
-            failwith $"错误: Copy操作只能用于结构体类型 而不是: %O{t}"
+            failwith $"Error: Copy operation can only be applied to struct types, not: {t}"
 
     | Eq(lhs, rhs)
     | Less(lhs, rhs) as expr ->

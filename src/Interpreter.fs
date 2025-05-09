@@ -149,7 +149,7 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             | Some(env', arg2) ->
                 Some(env', {node with Expr = Not(arg2)})
             | None -> None
-
+//copy
     | Copy(arg) ->
         match (reduce env arg) with
         | Some(env', arg') ->
@@ -157,18 +157,42 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
         | None when isValue arg ->
             match arg.Expr with
             | Pointer(addr) ->
+                // Implement recursive deep copy
+                let rec deepCopyStruct (env: RuntimeEnv<'E,'T>) (srcAddr: uint) : RuntimeEnv<'E,'T> * uint =
+                    match (env.PtrInfo.TryFind srcAddr) with
+                    | Some(fields) ->
+                        // Get field values from source struct
+                        let fieldValues = 
+                            List.mapi (fun i _ -> env.Heap[srcAddr + (uint i)]) fields
+                        // Allocate memory for the new struct
+                        let (heap', baseAddr) = heapAlloc env.Heap fieldValues
+                        // Update pointer information
+                        let ptrInfo' = env.PtrInfo.Add(baseAddr, fields)
+                        let tempEnv = {env with Heap = heap'; PtrInfo = ptrInfo'}
+                        // Process each field recursively to handle nested structs
+                        let mutable finalEnv = tempEnv
+                        for i = 0 to (fieldValues.Length - 1) do
+                            let fieldVal = fieldValues.[i]
+                            match fieldVal.Expr with 
+                            | Pointer(fieldAddr) when finalEnv.PtrInfo.ContainsKey(fieldAddr) ->
+                                // Recursively copy nested struct
+                                let (envAfterCopy, newAddr) = deepCopyStruct finalEnv fieldAddr
+                                // Update the copied struct field to point to the new nested struct
+                                let updatedHeap = envAfterCopy.Heap.Add(baseAddr + (uint i), 
+                                                                    {fieldVal with Expr = Pointer(newAddr)})
+                                finalEnv <- {envAfterCopy with Heap = updatedHeap}
+                            | _ -> 
+                                () // Non-struct field, no processing needed
+                        (finalEnv, baseAddr)
+                    | None -> 
+                        (env, srcAddr)  // Not a struct, return original value
+                // Execute deep copy
                 match (env.PtrInfo.TryFind addr) with
-                | Some(fields) ->
-                // 获取源结构的字段值
-                    let fieldValues = 
-                        List.mapi (fun i _ -> env.Heap[addr + (uint i)]) fields
-                // 为新结构分配内存
-                    let (heap', baseAddr) = heapAlloc env.Heap fieldValues
-                // 更新新结构的指针信息
-                    let ptrInfo' = env.PtrInfo.Add(baseAddr, fields)
-                    Some({env with Heap = heap'; PtrInfo = ptrInfo'}, 
-                         {node with Expr = Pointer(baseAddr)})
-                | None -> None
+                | Some(_) ->
+                    let (newEnv, newAddr) = deepCopyStruct env addr
+                    Some(newEnv, {node with Expr = Pointer(newAddr)})
+                | None -> 
+                    None
             | _ -> None
         | None -> None
 
@@ -416,7 +440,6 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
             // 2. reduce the condition expression e₂ into a value
                 Some(env2, {node with Expr = DoWhile(body, cond')})
             | None when (isValue cond) ->
-            // 由于F#的作用域规则，这里访问不到env2，必须使用env
                 match cond.Expr with
                 | BoolVal(true) ->
                 // if e₂ reduces to true, repeat from point 1
