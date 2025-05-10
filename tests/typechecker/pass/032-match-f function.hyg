@@ -1,0 +1,36 @@
+// Test for LUB computation with function return values
+// This is a simplified test that still verifies LUB behavior
+
+type Option = union {
+    Some: int;
+    None: unit
+};
+
+fun processNumber(n: int): Option =
+  if 0 < n then
+    Some{n}                // Returns union {Some: int}
+  else if n = 0 then
+    None{()}               // Returns union {None: unit}
+  else
+    Some{n * -1};          // Returns union {Some: int}
+
+// Test with different inputs
+let r1 = processNumber(5);  // Should be Some{5}
+let r2 = processNumber(0);  // Should be None{()}
+let r3 = processNumber(-3); // Should be Some{3}
+
+// Verify results
+assert(match r1 with {
+    Some{x} -> x = 5;
+    None{_} -> false
+});
+
+assert(match r2 with {
+    Some{_} -> false;
+    None{_} -> true
+});
+
+assert(match r3 with {
+    Some{x} -> x = 3;
+    None{_} -> false
+})

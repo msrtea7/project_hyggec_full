@@ -88,6 +88,14 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
         {node with Expr = LetT(vname, tpe, (subst init var sub),
                                (subst scope var sub))}
 
+    | LetRec(vname, tpe, init, scope) when vname = var ->
+        // The variable is shadowed, do not substitute it in the "let rec" scope
+        // Do not substitute 'var' in 'init' either - this is the key difference for recursive functions
+        {node with Expr = LetRec(vname, tpe, init, scope)}
+    | LetRec(vname, tpe, init, scope) ->
+        // Propagate the substitution in the "let rec" scope
+        {node with Expr = LetRec(vname, tpe, (subst init var sub), (subst scope var sub))}
+
     | LetMut(vname, init, scope) when vname = var ->
         // Do not substitute the variable in the "let mutable" scope
         {node with Expr = LetMut(vname, (subst init var sub), scope)}
@@ -177,6 +185,11 @@ let rec freeVars (node: Node<'E,'T>): Set<string> =
         // All the free variables in the 'let' initialisation, together with all
         // free variables in the scope --- minus the newly-bound variable
         Set.union (freeVars init) (Set.remove name (freeVars scope))
+    | LetRec(name, _, init, scope) ->
+        // For recursive functions, the name is not free in init
+        // (because init can refer to the function itself)
+        let initFreeVarsWithoutName = Set.remove name (freeVars init)
+        Set.union initFreeVarsWithoutName (Set.remove name (freeVars scope))
     | Assign(target, expr) ->
         // Union of the free names of the lhs and the rhs of the assignment
         Set.union (freeVars target) (freeVars expr)
@@ -257,6 +270,10 @@ let rec capturedVars (node: Node<'E,'T>): Set<string> =
     | LetMut(name, init, scope) ->
         // All the captured variables in the 'let' initialisation, together with
         // all captured variables in the scope --- minus the newly-bound var
+        Set.union (capturedVars init) (Set.remove name (capturedVars scope))
+    | LetRec(name, _, init, scope) ->
+        // Similar to Let, but for recursive functions we need to consider the captured variables
+        // without removing the function name from the init part (since it's recursive)
         Set.union (capturedVars init) (Set.remove name (capturedVars scope))
     | Assign(target, expr) ->
         // Union of the captured vars of the lhs and the rhs of the assignment

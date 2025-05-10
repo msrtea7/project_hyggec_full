@@ -103,6 +103,20 @@ let rec substVar (node: Node<'E,'T>) (var: string) (var2: string): Node<'E,'T> =
         {node with Expr = LetT(vname, tpe, (substVar init var var2),
                                (substVar scope var var2))}
 
+    | LetRec(vname, tpe, init, scope) when vname = var ->
+        // Do not substitute the variable in the "let rec" scope
+        {node with Expr = LetRec(vname, tpe, (substVar init var var2), scope)}
+    | LetRec(vname, tpe, init, scope) ->
+        {node with Expr = LetRec(vname, tpe, (substVar init var var2),
+                                (substVar scope var var2))}
+
+    | LetRec(vname, tpe, init, scope) when vname = var ->
+        // Do not substitute the variable in the "let rec" scope
+        {node with Expr = LetRec(vname, tpe, (substVar init var var2), scope)}
+    | LetRec(vname, tpe, init, scope) ->
+        {node with Expr = LetRec(vname, tpe, (substVar init var var2),
+                                (substVar scope var var2))}
+
     | LetMut(vname, init, scope) when vname = var ->
         // Do not substitute the variable in the "let mutable" scope
         {node with Expr = LetMut(vname, (substVar init var var2), scope)}
@@ -298,6 +312,7 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
 
     | Let(name, init, scope)
     | LetT(name, _, init, scope)
+    | LetRec(name, _, init, scope) 
     | LetMut(name, init, scope) as expr ->
         // ANF requires variable names to be unique, so we rewrite the scope
         /// Variable name bound by this 'let' expression, made unique
@@ -322,7 +337,8 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
         /// Is this a mutable "let"?
         let isMutable = match expr with
                         | Let(_,_,_)
-                        | LetT(_,_,_,_) -> false
+                        | LetT(_,_,_,_)
+                        | LetRec(_,_,_,_) -> false
                         | LetMut(_,_,_) -> true
                         | e -> failwith $"BUG: unexpected expression: %O{e}"
         /// Definition binding the "let" variable to the init expression in ANF

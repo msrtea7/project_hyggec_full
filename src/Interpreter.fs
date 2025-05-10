@@ -7,7 +7,7 @@
 module Interpreter
 
 open AST
-
+open ASTUtil
 
 /// Does the given AST node represent a value?
 let rec isValue (node: Node<'E,'T>): bool =
@@ -401,6 +401,25 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
                 Some(env''', {node with Expr = LetMut(name, init', scope')})
             | None -> None
         | None -> None
+    | LetRec(name, tpe, init, scope) ->
+        match (reduce env init) with
+        | Some(env', init') ->
+            Some(env', {node with Expr = LetRec(name, tpe, init', scope)})
+        | None when (isValue init) ->
+            match init.Expr with
+            | Lambda(args, body) ->
+            // Apply the [R-LetRec-Subst] rule:
+            // Create v' by replacing occurrences of 'name' in 'init' with the
+            // recursive definition itself
+                let recLambda =
+                    let recTerm = {node with Expr = LetRec(name, tpe, init, {node with Expr = Var(name)})}
+                    let newBody = ASTUtil.subst body name recTerm
+                    {init with Expr = Lambda(args, newBody)}
+                    // Now substitute the recursive lambda in the scope
+                Some(env, {node with Expr = (ASTUtil.subst scope name recLambda).Expr})
+            | _ -> None  // Only lambda terms are allowed as recursive definitions
+        | None -> None
+    
 
     | Assign({Expr = FieldSelect(selTarget, field)} as target,
              expr) when not (isValue selTarget)->

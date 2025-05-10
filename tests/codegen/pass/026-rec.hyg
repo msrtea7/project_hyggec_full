@@ -1,0 +1,31 @@
+// File: tests/codegen/pass/031-simpler-rec.hyg
+// Simplified recursive function test, avoiding potential problem areas
+
+// Simple Fibonacci sequence implementation
+rec fun fibonacci(n: int): int = 
+  if n < 2 then 
+    n
+  else 
+    fibonacci(n + -1) + fibonacci(n + -2);
+
+// Tail-recursive factorial implementation
+rec fun tailFactorial(n: int, acc: int): int = 
+  if n < 2 then
+    acc
+  else
+    tailFactorial(n + -1, n * acc);
+
+// Using tail-recursive wrapper
+rec fun factorial(n: int): int = 
+  tailFactorial(n, 1);
+
+// Test results
+let fib5 = fibonacci(5);        // Should return 5
+let fact5 = factorial(5);       // Should return 120
+
+// Print results
+println(fib5);
+println(fact5);
+
+// Return unit value
+()

@@ -1,0 +1,29 @@
+// Test for LUB inference with nested pattern matching
+type Option = union {
+   Some: int;
+   None: unit
+};
+
+type Result = union {
+   Ok: Option;
+   Fail: string
+};
+
+fun processNested(r: Result): union {Some: int; None: unit; Fail: string} =
+ match r with {
+   Ok{opt} -> match opt with {
+               Some{x} -> Some{x + 1};
+               None{_} -> None{()}
+             };
+   Fail{msg} -> Fail{msg}
+ };
+
+// Test different inputs
+let r1 = processNested(Ok{Some{41}});
+
+// Verify results
+assert(match r1 with {
+   Some{x} -> x = 42;
+   None{_} -> false;
+   Fail{_} -> false
+})
