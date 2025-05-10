@@ -254,12 +254,23 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
                               + $"found %O{targ.Type}")])
         | Error(es) -> Error(es)
 
-    | Copy(arg) ->
+    | DeepCopy(arg) ->
         match (typer env arg) with
         | Ok(targ) ->
             match (expandType env targ.Type) with
             | TStruct(_) ->
-                Ok { Pos = node.Pos; Env = env; Type = targ.Type; Expr = Copy(targ) }
+                Ok { Pos = node.Pos; Env = env; Type = targ.Type; Expr = DeepCopy(targ) }
+            | _ ->
+                Error([(node.Pos, $"copy operation: expected argument of struct type, found %O{targ.Type}")])
+        | Error(es) -> Error(es)
+    
+
+    | ShallowCopy(arg) ->
+        match (typer env arg) with
+        | Ok(targ) ->
+            match (expandType env targ.Type) with
+            | TStruct(_) ->
+                Ok { Pos = node.Pos; Env = env; Type = targ.Type; Expr = ShallowCopy(targ) }
             | _ ->
                 Error([(node.Pos, $"copy operation: expected argument of struct type, found %O{targ.Type}")])
         | Error(es) -> Error(es)

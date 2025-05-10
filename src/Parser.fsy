@@ -61,7 +61,7 @@ let mkBool (ps: IParseState) idx v =
 %token ANDSC ORSC
 
 // Structure operations
-%token COPY 
+%token DEEPCOPY  SHALLOWCOPY
 
 // Tokens for relational operators
 %token EQ LT
@@ -210,7 +210,8 @@ unaryExpr:
   | PRINT LPAR simpleExpr RPAR    { mkNode(parseState, 1, Expr.Print($3)) }
   | PRINTLN LPAR simpleExpr RPAR  { mkNode(parseState, 1, Expr.PrintLn($3)) }
   | ASSERT LPAR simpleExpr RPAR   { mkNode(parseState, 1, Expr.Assertion($3)) }
-  | COPY LPAR simpleExpr RPAR     { mkNode(parseState, 1, Expr.Copy($3)) }
+  | DEEPCOPY LPAR simpleExpr RPAR     { mkNode(parseState, 1, Expr.DeepCopy($3)) }
+  | SHALLOWCOPY LPAR simpleExpr RPAR     { mkNode(parseState, 1, Expr.ShallowCopy($3)) }
   | ascriptionExpr                { $1 }
   | primary parenExprCommaSeq     { mkNode(parseState, 1, Expr.Application($1, $2))}
 

@@ -37,8 +37,10 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
     | Not(arg) ->
         {node with Expr = Not(subst arg var sub)}
 //copy
-    | Copy(arg) ->
-        {node with Expr = Copy(subst arg var sub)}
+    | DeepCopy(arg) ->
+        {node with Expr = DeepCopy(subst arg var sub)}
+    | ShallowCopy(arg) ->
+        {node with Expr = ShallowCopy(subst arg var sub)}
 
     | Eq(lhs, rhs) ->
         {node with Expr = Eq((subst lhs var sub), (subst rhs var sub))}
@@ -155,7 +157,8 @@ let rec freeVars (node: Node<'E,'T>): Set<string> =
         Set.union (freeVars lhs) (freeVars rhs)
     | Not(arg) -> freeVars arg
 //copy
-    | Copy(arg) -> freeVars arg
+    | DeepCopy(arg) -> freeVars arg
+    | ShallowCopy(arg) -> freeVars arg
     | Eq(lhs, rhs)
     | Less(lhs, rhs) ->
         Set.union (freeVars lhs) (freeVars rhs)
@@ -235,7 +238,8 @@ let rec capturedVars (node: Node<'E,'T>): Set<string> =
         Set.union (capturedVars lhs) (capturedVars rhs)
     | Not(arg) -> capturedVars arg
 //copy 
-    | Copy(arg) -> capturedVars arg
+    | DeepCopy(arg) -> capturedVars arg
+    | ShallowCopy(arg) -> capturedVars arg
     | Eq(lhs, rhs)
     | Less(lhs, rhs) ->
         Set.union (capturedVars lhs) (capturedVars rhs)

@@ -187,7 +187,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         asm.AddText(RV.SEQZ(Reg.r(env.Target), Reg.r(env.Target)))
 
 //copy
-    | Copy(arg) ->
+    | DeepCopy(arg) ->
         // Generate code to compute the argument (get the struct address)
         let argCode = doCodegen env arg
         // Get struct type information
@@ -273,6 +273,60 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             argCode ++ generateDeepCopyCode env.Target (env.Target + 1u) arg.Type
         | t ->
             failwith $"Error: Copy operation can only be applied to struct types, not: {t}"
+
+    | ShallowCopy(arg) ->
+        let argCode = doCodegen env arg
+        // Get struct type information to determine field count and layout
+        match (expandType arg.Env arg.Type) with
+        | TStruct(fields) ->
+            let fieldCount = fields.Length
+        // Step 1: Allocate new heap memory space for the copied structure
+            let structAllocCode =
+                (beforeSysCall [Reg.a0] [])
+                    .AddText([
+                        (RV.LI(Reg.a0, fieldCount * 4),
+                        "Allocate memory space for the struct copy (in bytes)")
+                        (RV.LI(Reg.a7, 9), "RARS syscall: Sbrk")
+                        (RV.ECALL, "")
+                        (RV.MV(Reg.r(env.Target + 1u), Reg.a0),
+                        "Save system call result (struct memory address) to temporary register")
+                    ])
+                    ++ (afterSysCall [Reg.a0] [])
+        
+        // Step 2: Generate copy code for each field
+            let copyFieldsCode = 
+            // Use a loop to generate code to copy each field
+                let mutable copyCode = Asm()
+                for i in 0 .. (fieldCount - 1) do
+                    let fieldType = snd fields.[i]
+                    if isSubtypeOf arg.Env fieldType TFloat then
+                    // Floating point fields
+                        copyCode <- copyCode.AddText([
+                            (RV.FLW_S(FPReg.r(env.FPTarget), Imm12(i * 4), Reg.r(env.Target)),
+                            $"Load field %d{i} from source struct (floating point)")
+                            (RV.FSW_S(FPReg.r(env.FPTarget), Imm12(i * 4), Reg.r(env.Target + 1u)),
+                            $"Copy field %d{i} to target struct (floating point)")
+                    ])
+                    else if not (isSubtypeOf arg.Env fieldType TUnit) then
+                    // Integer and other type fields
+                        copyCode <- copyCode.AddText([
+                            (RV.LW(Reg.r(env.Target + 2u), Imm12(i * 4), Reg.r(env.Target)),
+                            $"Load field %d{i} from source struct")
+                            (RV.SW(Reg.r(env.Target + 2u), Imm12(i * 4), Reg.r(env.Target + 1u)),
+                            $"Copy field %d{i} to target struct")
+                        ])
+                copyCode
+        
+        // Final step: Move target struct address to target register
+            let finalCode = 
+                Asm(RV.MV(Reg.r(env.Target), Reg.r(env.Target + 1u)),
+                    "Move copied struct address to target register")
+        
+        // Combine all code together
+            argCode ++ structAllocCode ++ copyFieldsCode ++ finalCode
+        
+        | t ->
+            failwith $"Error: Copy operation can only be used on struct types, not: %O{t}"
 
     | Eq(lhs, rhs)
     | Less(lhs, rhs) as expr ->

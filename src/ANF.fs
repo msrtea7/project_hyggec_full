@@ -60,8 +60,10 @@ let rec substVar (node: Node<'E,'T>) (var: string) (var2: string): Node<'E,'T> =
     | Not(arg) ->
         {node with Expr = Not(substVar arg var var2)}
 //copy 
-    | Copy(arg) ->
-        {node with Expr = Copy(substVar arg var var2)}
+    | DeepCopy(arg) ->
+        {node with Expr = DeepCopy(substVar arg var var2)}
+    | ShallowCopy(arg) ->
+        {node with Expr = ShallowCopy(substVar arg var var2)}
 
     | Eq(lhs, rhs) ->
         {node with Expr = Eq((substVar lhs var var2), (substVar rhs var var2))}
@@ -241,12 +243,21 @@ let rec internal toANFDefs (node: Node<'E,'T>): Node<'E,'T> * ANFDefs<'E,'T> =
         let anfDef = ANFDef(false, {node with Expr = anfExpr})
 
         ({node with Expr = Var(anfDef.Var)}, anfDef :: argDefs)
-
-    | Copy(arg) as expr ->
+//copy
+    | DeepCopy(arg) as expr ->
     /// Argument in ANF and related definitions
         let (argANF, argDefs) = toANFDefs arg
     /// This expression in ANF
-        let anfExpr = Copy(argANF)
+        let anfExpr = DeepCopy(argANF)
+    /// Definition binding this expression in ANF to its variable
+        let anfDef = ANFDef(false, {node with Expr = anfExpr})
+        ({node with Expr = Var(anfDef.Var)}, anfDef :: argDefs)
+
+    | ShallowCopy(arg) as expr ->
+    /// Argument in ANF and related definitions
+        let (argANF, argDefs) = toANFDefs arg
+    /// This expression in ANF
+        let anfExpr = ShallowCopy(argANF)
     /// Definition binding this expression in ANF to its variable
         let anfDef = ANFDef(false, {node with Expr = anfExpr})
         ({node with Expr = Var(anfDef.Var)}, anfDef :: argDefs)

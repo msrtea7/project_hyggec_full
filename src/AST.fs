@@ -231,7 +231,8 @@ and Expr<'E,'T> =
 //copy
     /// Creates a copy of a structure. For shallow copy, only the top-level structure
     /// is duplicated.
-    | Copy of arg: Node<'E,'T>
+    | DeepCopy of arg: Node<'E,'T>
+    | ShallowCopy of arg: Node<'E,'T>
 
 
 /// A type alias for an untyped AST, where there is no typing environment nor

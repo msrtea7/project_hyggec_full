@@ -150,10 +150,33 @@ let rec internal reduce (env: RuntimeEnv<'E,'T>)
                 Some(env', {node with Expr = Not(arg2)})
             | None -> None
 //copy
-    | Copy(arg) ->
+    | ShallowCopy(arg) ->
         match (reduce env arg) with
         | Some(env', arg') ->
-            Some(env', {node with Expr = Copy(arg')})
+            Some(env', {node with Expr = ShallowCopy(arg')})
+        | None when isValue arg ->
+            match arg.Expr with
+            | Pointer(addr) ->
+                match (env.PtrInfo.TryFind addr) with
+                | Some(fields) ->
+                // Get field values from source structure 
+                    let fieldValues = 
+                        List.mapi (fun i _ -> env.Heap[addr + (uint i)]) fields
+                // Allocate memory for new structure 
+                    let (heap', baseAddr) = heapAlloc env.Heap fieldValues
+                // Update pointer information for new structure 
+                    let ptrInfo' = env.PtrInfo.Add(baseAddr, fields)
+                    Some({env with Heap = heap'; PtrInfo = ptrInfo'}, 
+                         {node with Expr = Pointer(baseAddr)})
+                | None -> None
+            | _ -> None
+        | None -> None
+
+
+    | DeepCopy(arg) ->
+        match (reduce env arg) with
+        | Some(env', arg') ->
+            Some(env', {node with Expr = DeepCopy(arg')})
         | None when isValue arg ->
             match arg.Expr with
             | Pointer(addr) ->
