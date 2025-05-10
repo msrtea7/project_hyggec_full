@@ -21,8 +21,8 @@ let letter     = ['a'-'z'] | ['A'-'Z']
 let digit      = ['0'-'9']
 let litUnit    = "()"
 let litBool    = "true" | "false"
-let litInt     = digit+
-let litFloat   = digit+ '.' digit+ (('e'|'E') ('+'|'-')? digit+)? 'f'
+let litInt     = ['-']? digit+
+let litFloat   = ['-']? digit+ '.' digit+ (('e'|'E') ('+'|'-')? digit+)? 'f'
 let litString  = '"' ("\\\"" | [^'"'])* '"'
 let ident      = (letter | '_') (letter | '_' | digit)*
 let whitespace = [' ' '\t' '\r']
@@ -77,6 +77,7 @@ rule tokenize = parse
 | "then"       { Parser.THEN }
 | "else"       { Parser.ELSE }
 | "let"        { Parser.LET }
+| "rec"        { Parser.REC }
 | "readInt"    { Parser.READ_INT }
 | "readFloat"  { Parser.READ_FLOAT }
 | "print"      { Parser.PRINT }

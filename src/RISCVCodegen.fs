@@ -71,6 +71,7 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         Asm().AddData(label, Alloc.String(v))
              .AddText(RV.LA(Reg.r(env.Target), label))
 
+
     | Var(name) ->
         // To compile a variable, we inspect its type and where it is stored
         match node.Type with
@@ -108,6 +109,8 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
             | Some(Storage.FPReg(_)) as st ->
                 failwith $"BUG: variable %s{name} of type %O{t} has unexpected storage %O{st}"
             | None -> failwith $"BUG: variable without storage: %s{name}"
+    | Match(_, _) ->
+        failwith "Match expressions not yet supported"
 
     | Add(lhs, rhs)
     | Mult(lhs, rhs) as expr ->
@@ -444,6 +447,38 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         (doCodegen {env with VarStorage = varStorage2} scope)
             ++ funCode
 
+    // Special case for compiling a recursive function with a given immutable name
+    // We recognize this case by checking whether the 'LetRec' declares 'name' as a Lambda expression with a TFun type
+    | LetRec(name, _, {Node.Expr = Lambda(args, body); 
+                       Node.Type = TFun(targs, _)}, scope) ->
+        /// Assembly label to mark the position of the compiled function body.
+        /// For readability, we make the label similar to the function name
+        let funLabel = Util.genSymbol $"fun_%s{name}"
+
+        /// Names of the lambda term arguments
+        let (argNames, _) = List.unzip args
+        /// List of pairs associating each function argument to its type
+        let argNamesTypes = List.zip argNames targs
+    
+        /// Storage info where the name of the compiled function points to the
+        /// label 'funLabel' - This is critical for recursion to work
+        let varStorage2 = env.VarStorage.Add(name, Storage.Label(funLabel))
+    
+        /// Compiled function body - using the updated environment that includes the function itself
+        let bodyCode = compileFunction argNamesTypes body {env with VarStorage = varStorage2}
+    
+        /// Compiled function code where the function label is located just
+        /// before the 'bodyCode', and everything is placed at the end of the
+        /// Text segment (i.e. in the "PostText")
+        let funCode =
+            (Asm(RV.LABEL(funLabel), $"Code for recursive function '%s{name}'")
+                ++ bodyCode).TextToPostText
+
+        // Finally, compile the 'let rec' scope with the newly-defined function
+        // label in the variables storage, and append the 'funCode' above.
+        (doCodegen {env with VarStorage = varStorage2} scope)
+            ++ funCode
+
     | Let(name, init, scope)
     | LetT(name, _, init, scope)
     | LetMut(name, init, scope) ->
@@ -453,24 +488,24 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         let initCode = doCodegen env init
         match init.Type with
         | t when (isSubtypeOf init.Env t TUnit) ->
-            // The 'init' produces a unit value, i.e. nothing: we can keep using
-            // the same target registers, and we don't need to update the
-            // variables-to-registers mapping.
+        // The 'init' produces a unit value, i.e. nothing: we can keep using
+        // the same target registers, and we don't need to update the
+        // variables-to-registers mapping.
             initCode ++ (doCodegen env scope)
         | t when (isSubtypeOf init.Env t TFloat) ->
-            /// Target register for compiling the 'let' scope
+        /// Target register for compiling the 'let' scope
             let scopeTarget = env.FPTarget + 1u
-            /// Variable storage for compiling the 'let' scope
+        /// Variable storage for compiling the 'let' scope
             let scopeVarStorage =
                 env.VarStorage.Add(name, Storage.FPReg(FPReg.r(env.FPTarget)))
-            /// Environment for compiling the 'let' scope
+        /// Environment for compiling the 'let' scope
             let scopeEnv = { env with FPTarget = scopeTarget
                                       VarStorage = scopeVarStorage }
             initCode
                 ++ (doCodegen scopeEnv scope)
                     .AddText(RV.FMV_S(FPReg.r(env.FPTarget),
                                       FPReg.r(scopeTarget)),
-                             "Move result of 'let' scope expression into target register")
+                            "Move result of 'let' scope expression into target register")
         | _ ->  // Default case for integer-like initialisation expressions
             /// Target register for compiling the 'let' scope
             let scopeTarget = env.Target + 1u
@@ -484,6 +519,45 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                 ++ (doCodegen scopeEnv scope)
                     .AddText(RV.MV(Reg.r(env.Target), Reg.r(scopeTarget)),
                              "Move 'let' scope result to 'let' target register")
+
+    | LetRec(name, _, init, scope) ->
+        /// 'let rec...' initialisation code, which leaves its result in the
+        /// 'target' register (which we overwrite at the end of the 'scope'
+        /// execution)
+        let initCode = doCodegen env init
+        match init.Type with
+        | t when (isSubtypeOf init.Env t TUnit) ->
+            // The 'init' produces a unit value, i.e. nothing: we can keep using
+            // the same target registers, and we don't need to update the
+            // variables-to-registers mapping.
+            initCode ++ (doCodegen env scope)
+        | t when (isSubtypeOf init.Env t TFloat) ->
+            /// Target register for compiling the 'let rec' scope
+            let scopeTarget = env.FPTarget + 1u
+            /// Variable storage for compiling the 'let rec' scope
+            let scopeVarStorage =
+                env.VarStorage.Add(name, Storage.FPReg(FPReg.r(env.FPTarget)))
+            /// Environment for compiling the 'let rec' scope
+            let scopeEnv = { env with FPTarget = scopeTarget
+                                      VarStorage = scopeVarStorage }
+            initCode
+                ++ (doCodegen scopeEnv scope)
+                    .AddText(RV.FMV_S(FPReg.r(env.FPTarget),
+                                      FPReg.r(scopeTarget)),
+                             "Move result of 'let rec' scope expression into target register")
+        | _ ->  // Default case for integer-like initialisation expressions
+            /// Target register for compiling the 'let rec' scope
+            let scopeTarget = env.Target + 1u
+            /// Variable storage for compiling the 'let rec' scope
+            let scopeVarStorage =
+                env.VarStorage.Add(name, Storage.Reg(Reg.r(env.Target)))
+            /// Environment for compiling the 'let rec' scope
+            let scopeEnv = { env with Target = scopeTarget
+                                      VarStorage = scopeVarStorage }
+            initCode
+                ++ (doCodegen scopeEnv scope)
+                    .AddText(RV.MV(Reg.r(env.Target), Reg.r(scopeTarget)),
+                             "Move 'let rec' scope result to 'let rec' target register")
 
     | Assign(lhs, rhs) ->
         match lhs.Expr with
@@ -766,6 +840,9 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
 
     | Pointer(_) ->
         failwith "BUG: pointers cannot be compiled (by design!)"
+    
+    | UnionCons(label, expr) ->
+        failwith "UnionCons expressions not yet fully supported in codegen"
 
 /// Generate code to save the given registers on the stack, before a RARS system
 /// call. Register a7 (which holds the system call number) is backed-up by

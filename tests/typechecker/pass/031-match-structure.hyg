@@ -1,0 +1,28 @@
+// Test for struct LUB inference
+type Point2D = struct {
+   x: int;
+   y: int
+};
+
+type Point3D = struct {
+   x: int;
+   y: int;
+   z: int
+};
+
+fun incompatibleStructs(cond: bool): struct { x: int; y: int } =
+  if cond then
+    struct { x = 1; y = 2 }            // struct { x: int; y: int }
+  else
+    struct { x = 1; y = 2; z = 3 };    // struct { x: int; y: int; z: int }
+                                      // LUB struct { x: int; y: int }
+
+// test
+let p1 = incompatibleStructs(true);
+let p2 = incompatibleStructs(false); 
+
+// result
+assert(p1.x = 1);
+assert(p1.y = 2);
+assert(p2.x = 1);
+assert(p2.y = 2)

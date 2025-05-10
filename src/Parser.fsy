@@ -46,6 +46,7 @@ let mkNode (parseState: IParseState, inputIdx: int, e: UntypedExpr): UntypedAST 
 %token <single> LIT_FLOAT
 %token <string> LIT_STRING
 %token <unit> LIT_UNIT
+%token LET REC TYPE MUTABLE
 
 // Tokens for arithmetic operators
 %token TIMES PLUS
@@ -62,9 +63,6 @@ let mkNode (parseState: IParseState, inputIdx: int, e: UntypedExpr): UntypedAST 
 // Tokens for parentheses and brackets
 %token LPAR RPAR LCURLY RCURLY
 
-// Variable and type declarators
-%token LET TYPE MUTABLE
-
 // Misc tokens
 %token SEMI EOF COLON LARROW RARROW COMMA DOT
 
@@ -80,6 +78,7 @@ let mkNode (parseState: IParseState, inputIdx: int, e: UntypedExpr): UntypedAST 
 %token STRUCT
 %token UNION MATCH WITH
 
+
 // Generic identifier (might result in a variable, pretype, etc.)
 %token <string> IDENT
 
@@ -94,6 +93,15 @@ let mkNode (parseState: IParseState, inputIdx: int, e: UntypedExpr): UntypedAST 
 // Starting point: parsing rule for a whole Hygge program.
 program:
     | expr EOF  { $1 } // A program is an expression followed by End-Of-File
+    // 添加一个新规则，处理以分号结尾的顶级递归函数定义
+    | REC FUN variable parenArgTypesSeq COLON pretype EQ simpleExpr SEMI EOF  {
+        let (_, argTypes) = List.unzip $4 // Extract argument pretypes
+        let lambda = mkNode(parseState, 8, Lambda($4, $8))
+        let unitVal = mkNode(parseState, 9, Expr.UnitVal)
+        mkNode(parseState, 1, Expr.LetRec($3, mkPretypeNode(parseState, 6, 
+                                                         Pretype.TFun(argTypes, $6)),
+                                        lambda, unitVal))
+    }
 
 // Any expression.
 expr:
@@ -108,6 +116,42 @@ expr:
     }
   | LET MUTABLE variable EQ simpleExpr SEMI expr  {
         mkNode(parseState, 1, Expr.LetMut($3, $5, $7))
+    }
+  | LET REC variable COLON pretype EQ expr SEMI expr  {
+        mkNode(parseState, 1, Expr.LetRec($3, $5, $7, $9))
+    }   
+  // 新增：支持带参数的 let rec 语法（expr 版本）
+  | LET REC variable parenArgTypesSeq COLON pretype EQ expr SEMI expr  {
+        let (_, argTypes) = List.unzip $4 // Extract argument pretypes
+        mkNode(parseState, 1, Expr.LetRec($3, mkPretypeNode(parseState, 6, 
+                                                          Pretype.TFun(argTypes, $6)),
+                                         mkNode(parseState, 8, Lambda($4, $8)), $10))
+    }
+  // 新增：支持带参数的 let rec 语法（simpleExpr 版本）
+  | LET REC variable parenArgTypesSeq COLON pretype EQ simpleExpr SEMI expr  {
+        let (_, argTypes) = List.unzip $4 // Extract argument pretypes
+        mkNode(parseState, 1, Expr.LetRec($3, mkPretypeNode(parseState, 6, 
+                                                          Pretype.TFun(argTypes, $6)),
+                                         mkNode(parseState, 8, Lambda($4, $8)), $10))
+    }
+  | REC FUN variable parenArgTypesSeq COLON pretype EQ expr SEMI expr  {
+        let (_, argTypes) = List.unzip $4 // Extract argument pretypes
+        mkNode(parseState, 1, Expr.LetRec($3, mkPretypeNode(parseState, 6,
+                                                          Pretype.TFun(argTypes, $6)),
+                                         mkNode(parseState, 8, Lambda($4, $8)), $10))
+    }
+  | REC FUN variable parenArgTypesSeq COLON pretype EQ simpleExpr SEMI expr  {
+        let (_, argTypes) = List.unzip $4 // Extract argument pretypes
+        mkNode(parseState, 1, Expr.LetRec($3, mkPretypeNode(parseState, 6,
+                                                          Pretype.TFun(argTypes, $6)),
+                                         mkNode(parseState, 8, Lambda($4, $8)), $10))
+    }
+  | REC FUN variable parenArgTypesSeq COLON pretype EQ FUN parenArgTypesSeq RARROW simpleExpr SEMI expr  {
+        let (_, argTypes) = List.unzip $4 // Extract argument pretypes
+        let innerLambda = mkNode(parseState, 8, Expr.Lambda($9, $11))
+        mkNode(parseState, 1, Expr.LetRec($3, mkPretypeNode(parseState, 6,
+                                                          Pretype.TFun(argTypes, $6)),
+                                         innerLambda, $13))
     }
   | FUN variable parenArgTypesSeq COLON pretype EQ simpleExpr SEMI expr  {
       let (_, argTypes) = List.unzip $3 // Extract argument pretypes
@@ -149,8 +193,27 @@ simpleExpr:
   | primary LARROW simpleExpr  { mkNode(parseState, 2, Expr.Assign($1, $3)) }
   | WHILE simpleExpr DO simpleExpr  { mkNode(parseState, 1, Expr.While($2, $4)) }
   | FUN parenArgTypesSeq RARROW simpleExpr  { mkNode(parseState, 1, Expr.Lambda($2, $4)) }
+  | FUN variable RARROW simpleExpr  { mkNode(parseState, 1, Expr.Lambda([($2, mkPretypeNode(parseState, 1, Pretype.TId("")))], $4)) }
   | MATCH simpleExpr WITH LCURLY matchCases RCURLY  { mkNode(parseState, 1,
                                                              Expr.Match($2, $5)) }
+  // 添加对嵌套在函数体内的rec fun语法的支持
+  | REC FUN variable parenArgTypesSeq COLON pretype EQ simpleExpr  {
+      let (_, argTypes) = List.unzip $4 // Extract argument pretypes
+      let lambda = mkNode(parseState, 8, Lambda($4, $8))
+      let unitVal = mkNode(parseState, 1, Expr.UnitVal)
+      mkNode(parseState, 1, Expr.LetRec($3, mkPretypeNode(parseState, 6, 
+                                                      Pretype.TFun(argTypes, $6)),
+                                      lambda, unitVal))
+  }
+  // 新增：支持嵌套中的 let rec 语法
+  | LET REC variable parenArgTypesSeq COLON pretype EQ simpleExpr  {
+      let (_, argTypes) = List.unzip $4 // Extract argument pretypes
+      let lambda = mkNode(parseState, 8, Lambda($4, $8))
+      let unitVal = mkNode(parseState, 1, Expr.UnitVal)
+      mkNode(parseState, 1, Expr.LetRec($3, mkPretypeNode(parseState, 6, 
+                                                      Pretype.TFun(argTypes, $6)),
+                                      lambda, unitVal))
+  }
 
 // An 'if-then-else' expression
 ifExpr:
@@ -228,6 +291,8 @@ pretype:
                                                              Pretype.TId($1)) }
   | parenTypesSeq RARROW pretype             { mkPretypeNode(parseState, 1,
                                                              Pretype.TFun($1, $3)) }
+  | ident RARROW pretype                     { mkPretypeNode(parseState, 1,
+                                                             Pretype.TFun([mkPretypeNode(parseState, 1, Pretype.TId($1))], $3)) }
   | STRUCT LCURLY structFieldTypeSeq RCURLY  { mkPretypeNode(parseState, 1,
                                                              Pretype.TStruct($3)) }
   | UNION LCURLY unionLabelTypeSeq RCURLY    { mkPretypeNode(parseState, 1,

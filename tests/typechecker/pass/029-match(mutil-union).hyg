@@ -1,0 +1,22 @@
+// Test for LUB inference with multi-branch union types
+type Result = union {
+   Success: int;
+   Warning: string;
+   Error: string
+};
+
+fun processResult(r: Result): union {Success: int; Error: string} = 
+ match r with {
+   Success{x} -> Success{x * 2};
+   Warning{msg} -> Error{msg};
+   Error{err} -> Error{err}
+ };
+
+// Test different inputs
+let r1 = processResult(Success{10});
+
+// Verify results
+assert(match r1 with {
+   Success{x} -> x = 20;
+   Error{_} -> false
+})
