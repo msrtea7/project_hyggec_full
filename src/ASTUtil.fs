@@ -36,6 +36,11 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
         {node with Expr = Or((subst lhs var sub), (subst rhs var sub))}
     | Not(arg) ->
         {node with Expr = Not(subst arg var sub)}
+//copy
+    | DeepCopy(arg) ->
+        {node with Expr = DeepCopy(subst arg var sub)}
+    | ShallowCopy(arg) ->
+        {node with Expr = ShallowCopy(subst arg var sub)}
 
     | Eq(lhs, rhs) ->
         {node with Expr = Eq((subst lhs var sub), (subst rhs var sub))}
@@ -98,6 +103,12 @@ let rec subst (node: Node<'E,'T>) (var: string) (sub: Node<'E,'T>): Node<'E,'T> 
         let substBody = subst body var sub
         {node with Expr = While(substCond, substBody)}
 
+//dowhile
+    | DoWhile(body, cond) ->
+        let substBody = subst body var sub
+        let substCond = subst cond var sub
+        {node with Expr = DoWhile(substBody, substCond)}
+
     | Lambda(args, body) ->
         /// Arguments of this lambda term, without their pretypes
         let (argVars, _) = List.unzip args
@@ -145,6 +156,9 @@ let rec freeVars (node: Node<'E,'T>): Set<string> =
     | Or(lhs, rhs) ->
         Set.union (freeVars lhs) (freeVars rhs)
     | Not(arg) -> freeVars arg
+//copy
+    | DeepCopy(arg) -> freeVars arg
+    | ShallowCopy(arg) -> freeVars arg
     | Eq(lhs, rhs)
     | Less(lhs, rhs) ->
         Set.union (freeVars lhs) (freeVars rhs)
@@ -167,6 +181,8 @@ let rec freeVars (node: Node<'E,'T>): Set<string> =
         // Union of the free names of the lhs and the rhs of the assignment
         Set.union (freeVars target) (freeVars expr)
     | While(cond, body) -> Set.union (freeVars cond) (freeVars body)
+//dowhile
+    | DoWhile(body, cond) -> Set.union (freeVars body) (freeVars cond)
     | Assertion(arg) -> freeVars arg
     | Type(_, _, scope) -> freeVars scope
     | Lambda(args, body) ->
@@ -221,6 +237,9 @@ let rec capturedVars (node: Node<'E,'T>): Set<string> =
     | Or(lhs, rhs) ->
         Set.union (capturedVars lhs) (capturedVars rhs)
     | Not(arg) -> capturedVars arg
+//copy 
+    | DeepCopy(arg) -> capturedVars arg
+    | ShallowCopy(arg) -> capturedVars arg
     | Eq(lhs, rhs)
     | Less(lhs, rhs) ->
         Set.union (capturedVars lhs) (capturedVars rhs)
@@ -243,6 +262,8 @@ let rec capturedVars (node: Node<'E,'T>): Set<string> =
         // Union of the captured vars of the lhs and the rhs of the assignment
         Set.union (capturedVars target) (capturedVars expr)
     | While(cond, body) -> Set.union (capturedVars cond) (capturedVars body)
+//dowhile
+    | DoWhile(body, cond) -> Set.union (capturedVars body) (capturedVars cond)
     | Assertion(arg) -> capturedVars arg
     | Type(_, _, scope) -> capturedVars scope
     | Application(expr, args) ->

@@ -185,6 +185,12 @@ and Expr<'E,'T> =
     | While of cond: Node<'E,'T>
              * body: Node<'E,'T>
 
+
+//dowhile
+    /// 'Do-While' loop: execute 'body' at least once, then repeat while 'cond' is true.
+    | DoWhile of body: Node<'E,'T>
+           * cond: Node<'E,'T>
+
     /// Lambda term, i.e. function instance.
     | Lambda of args: List<string * PretypeNode>
               * body: Node<'E,'T>
@@ -220,6 +226,13 @@ and Expr<'E,'T> =
     /// match case value).
     | Match of expr: Node<'E,'T>
              * cases: List<string * string * Node<'E,'T>>
+          
+
+//copy
+    /// Creates a copy of a structure. For shallow copy, only the top-level structure
+    /// is duplicated.
+    | DeepCopy of arg: Node<'E,'T>
+    | ShallowCopy of arg: Node<'E,'T>
 
 
 /// A type alias for an untyped AST, where there is no typing environment nor

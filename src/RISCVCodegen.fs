@@ -199,6 +199,148 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
         let asm = doCodegen env arg
         asm.AddText(RV.SEQZ(Reg.r(env.Target), Reg.r(env.Target)))
 
+//copy
+    | DeepCopy(arg) ->
+        // Generate code to compute the argument (get the struct address)
+        let argCode = doCodegen env arg
+        // Get struct type information
+        match (expandType arg.Env arg.Type) with
+        | TStruct(fields) ->
+            // Helper function to implement recursive deep copy
+            let rec generateDeepCopyCode (sourceReg: uint) (targetReg: uint) (structType: Type) : Asm =
+                match (expandType arg.Env structType) with
+                | TStruct(nestedFields) ->
+                    let fieldCount = nestedFields.Length
+                    // Allocate memory for the new struct
+                    let allocCode =
+                        (beforeSysCall [Reg.a0] [])
+                            .AddText([
+                                (RV.LI(Reg.a0, fieldCount * 4),
+                                "Allocate memory for struct copy (in bytes)")
+                                (RV.LI(Reg.a7, 9), "RARS syscall: Sbrk")
+                                (RV.ECALL, "")
+                                (RV.MV(Reg.r(targetReg), Reg.a0),
+                                "Store new struct address")
+                            ])
+                            ++ (afterSysCall [Reg.a0] [])
+                    // Generate code to copy each field
+                    let copyFieldsCode = 
+                        let mutable code = Asm()
+                        for i in 0 .. (fieldCount - 1) do
+                            let (fieldName, fieldType) = nestedFields.[i]
+                            if isSubtypeOf arg.Env fieldType TFloat then
+                                // Copy float field
+                                code <- code.AddText([
+                                    (RV.FLW_S(FPReg.r(env.FPTarget), Imm12(i * 4), Reg.r(sourceReg)),
+                                    $"Load field {fieldName} from source struct (float)")
+                                    (RV.FSW_S(FPReg.r(env.FPTarget), Imm12(i * 4), Reg.r(targetReg)),
+                                    $"Copy field {fieldName} to target struct (float)")
+                                ])
+                            else if not (isSubtypeOf arg.Env fieldType TUnit) then
+                                match (expandType arg.Env fieldType) with
+                                | TStruct(_) ->
+                                    // Handle nested structs
+                                    let nestedSourceReg = sourceReg + 2u
+                                    let nestedTargetReg = targetReg + 3u
+                                    // Load pointer to nested struct
+                                    code <- code.AddText([
+                                        (RV.LW(Reg.r(nestedSourceReg), Imm12(i * 4), Reg.r(sourceReg)),
+                                        $"Load nested struct pointer from field {fieldName}")
+                                    ])
+                                    // Save current register state
+                                    code <- code.AddText([
+                                        (RV.SW(Reg.r(sourceReg), Imm12(-4), Reg.sp), "Save source struct address")
+                                        (RV.SW(Reg.r(targetReg), Imm12(-8), Reg.sp), "Save target struct address")
+                                        (RV.ADDI(Reg.sp, Reg.sp, Imm12(-8)), "Adjust stack pointer")
+                                    ])
+                                    // Recursively copy nested struct
+                                    code <- code ++ generateDeepCopyCode nestedSourceReg nestedTargetReg fieldType
+                                    // Restore register state
+                                    code <- code.AddText([
+                                        (RV.ADDI(Reg.sp, Reg.sp, Imm12(8)), "Restore stack pointer")
+                                        (RV.LW(Reg.r(sourceReg), Imm12(-4), Reg.sp), "Restore source struct address")
+                                        (RV.LW(Reg.r(targetReg), Imm12(-8), Reg.sp), "Restore target struct address")
+                                    ])
+                                    // Store new nested struct address in current struct
+                                    code <- code.AddText([
+                                        (RV.SW(Reg.r(nestedTargetReg), Imm12(i * 4), Reg.r(targetReg)),
+                                        $"Store new nested struct address to field {fieldName}")
+                                    ])
+                                | _ ->
+                                    // Copy regular field
+                                    code <- code.AddText([
+                                        (RV.LW(Reg.r(sourceReg + 2u), Imm12(i * 4), Reg.r(sourceReg)),
+                                        $"Load field {fieldName} from source struct")
+                                        (RV.SW(Reg.r(sourceReg + 2u), Imm12(i * 4), Reg.r(targetReg)),
+                                        $"Copy field {fieldName} to target struct")
+                                    ])
+                        code
+                    // Move result to target register
+                    let moveResultCode = 
+                        Asm(RV.MV(Reg.r(env.Target), Reg.r(targetReg)),
+                            "Move final struct address to target register")
+                    allocCode ++ copyFieldsCode ++ moveResultCode
+                | _ -> 
+                    Asm() // Not a struct type
+            // Call recursive function to generate deep copy code
+            argCode ++ generateDeepCopyCode env.Target (env.Target + 1u) arg.Type
+        | t ->
+            failwith $"Error: Copy operation can only be applied to struct types, not: {t}"
+
+    | ShallowCopy(arg) ->
+        let argCode = doCodegen env arg
+        // Get struct type information to determine field count and layout
+        match (expandType arg.Env arg.Type) with
+        | TStruct(fields) ->
+            let fieldCount = fields.Length
+        // Step 1: Allocate new heap memory space for the copied structure
+            let structAllocCode =
+                (beforeSysCall [Reg.a0] [])
+                    .AddText([
+                        (RV.LI(Reg.a0, fieldCount * 4),
+                        "Allocate memory space for the struct copy (in bytes)")
+                        (RV.LI(Reg.a7, 9), "RARS syscall: Sbrk")
+                        (RV.ECALL, "")
+                        (RV.MV(Reg.r(env.Target + 1u), Reg.a0),
+                        "Save system call result (struct memory address) to temporary register")
+                    ])
+                    ++ (afterSysCall [Reg.a0] [])
+        
+        // Step 2: Generate copy code for each field
+            let copyFieldsCode = 
+            // Use a loop to generate code to copy each field
+                let mutable copyCode = Asm()
+                for i in 0 .. (fieldCount - 1) do
+                    let fieldType = snd fields.[i]
+                    if isSubtypeOf arg.Env fieldType TFloat then
+                    // Floating point fields
+                        copyCode <- copyCode.AddText([
+                            (RV.FLW_S(FPReg.r(env.FPTarget), Imm12(i * 4), Reg.r(env.Target)),
+                            $"Load field %d{i} from source struct (floating point)")
+                            (RV.FSW_S(FPReg.r(env.FPTarget), Imm12(i * 4), Reg.r(env.Target + 1u)),
+                            $"Copy field %d{i} to target struct (floating point)")
+                    ])
+                    else if not (isSubtypeOf arg.Env fieldType TUnit) then
+                    // Integer and other type fields
+                        copyCode <- copyCode.AddText([
+                            (RV.LW(Reg.r(env.Target + 2u), Imm12(i * 4), Reg.r(env.Target)),
+                            $"Load field %d{i} from source struct")
+                            (RV.SW(Reg.r(env.Target + 2u), Imm12(i * 4), Reg.r(env.Target + 1u)),
+                            $"Copy field %d{i} to target struct")
+                        ])
+                copyCode
+        
+        // Final step: Move target struct address to target register
+            let finalCode = 
+                Asm(RV.MV(Reg.r(env.Target), Reg.r(env.Target + 1u)),
+                    "Move copied struct address to target register")
+        
+        // Combine all code together
+            argCode ++ structAllocCode ++ copyFieldsCode ++ finalCode
+        
+        | t ->
+            failwith $"Error: Copy operation can only be used on struct types, not: %O{t}"
+
     | Eq(lhs, rhs)
     | Less(lhs, rhs) as expr ->
         // Code generation for equality and less-than relations is very similar:
@@ -605,6 +747,26 @@ let rec internal doCodegen (env: CodegenEnv) (node: TypedAST): Asm =
                  "Load address of label at the beginning of the 'while' loop")
                 (RV.JR(Reg.r(env.Target)), "Jump to the end of the loop")
                 (RV.LABEL(whileEndLabel), "")
+            ])
+
+//dowhile
+    | DoWhile(body, cond) ->
+    /// Label for the body of the do-while loop
+        let doWhileBodyLabel = Util.genSymbol "do_while_body"
+    /// Label for the condition check
+        let doWhileCondLabel = Util.genSymbol "do_while_cond"
+    /// Label for the end of the do-while loop
+        let doWhileEndLabel = Util.genSymbol "do_while_end"
+    // First execute the body, without checking the condition
+        Asm(RV.LABEL(doWhileBodyLabel), "Body of the 'do-while' loop starts here")
+            ++ (doCodegen env body)
+            .AddText(RV.LABEL(doWhileCondLabel), "Condition check for the 'do-while' loop")
+        // Then check the condition
+            ++ (doCodegen env cond)
+            .AddText([
+                (RV.BNEZ(Reg.r(env.Target), doWhileBodyLabel),
+                 "Jump back to loop body if condition is true")
+                (RV.LABEL(doWhileEndLabel), "End of the 'do-while' loop")
             ])
 
     | Lambda(args, body) ->

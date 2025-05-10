@@ -118,6 +118,12 @@ let rec internal formatASTRec (node: AST.Node<'E,'T>): Tree =
                           ("rhs", formatASTRec rhs)]
     | Not(arg) ->
         mkTree "Not" node [("arg", formatASTRec arg)]
+//copy
+    | DeepCopy(arg) ->
+        mkTree "DeepCopy" node [("arg", formatASTRec arg)]
+    | ShallowCopy(arg) ->
+        mkTree "ShallowCopy" node [("arg", formatASTRec arg)]
+
     | Eq(lhs, rhs) ->
         mkTree "Eq" node [("lhs", formatASTRec lhs)
                           ("rhs", formatASTRec rhs)]
@@ -161,6 +167,10 @@ let rec internal formatASTRec (node: AST.Node<'E,'T>): Tree =
     | While(cond, body) ->
         mkTree $"While" node [("cond", formatASTRec cond)
                               ("body", formatASTRec body)]
+//dowhile
+    | DoWhile(body, cond) ->
+        mkTree $"DoWhile" node [("body", formatASTRec body)
+                                ("cond", formatASTRec cond)]
     | Lambda(args, body) ->
         /// Formatted arguments with their pretype
         let argChildren =
