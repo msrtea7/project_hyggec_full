@@ -1,0 +1,9 @@
+let b = true;
+let x = 10 * 4;
+let y = 1 * 2;
+let a = 10 * 4;
+let b = 1 * 2;
+let c = 10 * 4;
+let d = 1 * 2;
+if true then println("2 < 3!")
+        else println("2 >= 3!")

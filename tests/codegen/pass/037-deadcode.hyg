@@ -1,0 +1,3 @@
+let b = 2 < 3;
+if b then println("2 < 3")
+     else println("2 >= 3!")
