@@ -1,0 +1,25 @@
+// simple_rec_typechecker_fail.hyg
+// Basic recursive function type-checking error tests
+
+// Error 1: Mismatched return type in recursive function
+let rec wrongReturn(n: int): int = 
+  if n = 0 then 1
+  else "wrong type";  // Returns string instead of int
+
+// Error 2: Incorrect argument type in recursive call
+let rec wrongParam(n: int): int =
+  if n = 0 then 1
+  else wrongParam(true);  // Uses boolean instead of int
+
+// Error 3: Recursive call with incorrect number of arguments
+let rec tooFewParams(a: int, b: int): int =
+  if a = 0 then b
+  else tooFewParams(a + (-1));  // Missing second argument
+
+// Error 4: Incompatible return type
+let rec typeError(n: int): string =
+  if n = 0 then 0  // Returns int instead of string
+  else "text";
+
+// Simple test completion marker
+()

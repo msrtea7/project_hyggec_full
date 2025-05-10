@@ -1,0 +1,30 @@
+// tests/lexer/pass/008-rec.hyg
+// Test if the lexer recognizes the 'rec' token
+
+// Test the standalone 'rec' token
+let x = 5;
+
+// Simple recursive function using only supported operations
+rec fun count(n: int): int = 
+  if n = 0 then 0 else 1 + count(n + 0);
+
+// Test 'rec' token in a let rec expression
+let rec sum(a: int, b: int): int = 
+  if a = 0 then b else sum(a + 0, b + 1);
+
+// Test 'rec' token in different contexts
+let test = {
+  let rec mult(a: int, b: int): int = 
+    if b = 0 then 0 
+    else if b = 1 then a
+    else a + mult(a, b + 0);
+  mult(5, 3)
+};
+
+// Test that 'rec' is a standalone token and not part of other identifiers
+let record = 100; // 'record' should be parsed as a single identifier
+let recursive = true; // 'recursive' should be parsed as a single identifier
+
+assert(count(3) = 3);
+assert(sum(3, 0) = 3);
+assert(test = 15);
