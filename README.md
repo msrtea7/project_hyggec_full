@@ -20,8 +20,6 @@ Yin, Lingxiao (s242610)<br>
 |Pass more than 8 Integer Arguments via The Stack|Hard|Li, Junrui |
 |Partial Evaluation Optimization|Medium - Hard|Li, Junrui |
 
-Details given in the report: **./report_02247.pdf**
-
 ## Hyggec introduction
 
 Hygge and `hyggec` have been designed and developed as learning tools for the
