@@ -177,9 +177,9 @@ let rec isSubtypeOf (env: TypingEnv) (t1: Type) (t2: Type): bool =
             isSubtypeOf env t1 expandedT2
         | _ -> false
     | (TStruct(fields1), TStruct(fields2)) ->
-        // 创建映射用于高效查找
+        // mapping
         let fieldMap1 = Map.ofList fields1
-        // 检查超类型中的所有字段是否存在于子类型中，并且类型兼容
+        // sub fileds
         fields2 |> List.forall (fun (fieldName, fieldType2) ->
             match fieldMap1.TryFind fieldName with
             | Some fieldType1 -> isSubtypeOf env fieldType1 fieldType2
@@ -311,7 +311,7 @@ let rec internal typer (env: TypingEnv) (node: UntypedAST): TypingResult =
         | Ok(tcond) when (isSubtypeOf env tcond.Type TBool) ->
             match ((typer env ifT), (typer env ifF)) with
             | (Ok(tifT), Ok(tifF)) ->
-                // 尝试计算LUB，捕获可能的错误
+                //capture possible mistakes
                 try
                     let resultType = TypeInference.computeLUB tifT.Type tifF.Type
                     Ok { Pos = node.Pos; Env = env; Type = resultType;
@@ -759,11 +759,11 @@ and internal letTypeAnnotTyper pos (env: TypingEnv) (name: string)
     | Ok(letVariableType) ->
         match (typer env init) with
         | Ok(tinit) ->
-            // 特殊处理函数类型和联合类型的兼容性
+            // function and union
             let isCompatible =
                 match (tinit.Type, letVariableType) with
                 | (TFun(args1, ret1), TFun(args2, ret2)) ->
-                    // 如果是两个函数类型，特别处理联合类型和类型变量的情况
+                    // two functions
                     let argsCompatible = 
                         args1.Length = args2.Length && 
                         List.forall2 (fun a1 a2 -> isSubtypeOf env a2 a1) args1 args2
@@ -771,7 +771,7 @@ and internal letTypeAnnotTyper pos (env: TypingEnv) (name: string)
                     let retCompatible =
                         match (ret1, ret2) with
                         | (TUnion(_), TVar(_)) ->
-                            // 如果实现返回联合类型，声明返回类型变量
+                            // union
                             let expandedRet2 = expandType env ret2
                             match expandedRet2 with
                             | TUnion(_) -> isSubtypeOf env ret1 expandedRet2
@@ -785,11 +785,11 @@ and internal letTypeAnnotTyper pos (env: TypingEnv) (name: string)
                 then Error [(pos, $"variable '%s{name}' of type %O{letVariableType} "
                                 + $"initialized with expression of incompatible type %O{tinit.Type}")]
                 else
-                    // 创建新的变量环境
+                    
                     let envVars2 = env.Vars.Add(name, letVariableType)
-                    // 创建新的可变变量集合
+                    
                     let envMutVars2 = env.Mutables.Remove(name)
-                    // 创建新的环境
+                    
                     let env2 = { env with Vars = envVars2;
                                          Mutables = envMutVars2 }
                     match (typer env2 scope) with
