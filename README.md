@@ -1,7 +1,28 @@
-# hyggec - the Didactic Compiler for Hygge
+# 02247 Compiler Construction Project --- hyggec plus
 
-This is the source code `hyggec`, the didactic compiler for the Hygge
-programming language.
+## Team member
+
+**Group 18**
+
+Li, Junrui (s242643)<br>
+Li, Leyao (s242598)<br>
+Yin, Lingxiao (s242610)<br>
+
+## Added features
+
+|Feature|Complexity|Author|
+|---|---|---|
+|“And” and “Or” with Short-Circuit-Semantics|Medium|Yin, Lingxiao|
+|a Better “Do…While” Loop|Medium|Yin, Lingxiao|
+|Extend Hygge with Copying of Structures|Hard|Yin, Lingxiao|
+|Better Inference of the Pattern Matching Result Type|Hard|Li, Leyao|
+|Recursive Functions|Hard|Li, Leyao|
+|Pass more than 8 Integer Arguments via The Stack|Hard|Li, Junrui |
+|Partial Evaluation Optimization|Medium - Hard|Li, Junrui |
+
+Details given in the report: **./report_02247.pdf**
+
+## Hyggec introduction
 
 Hygge and `hyggec` have been designed and developed as learning tools for the
 course *02247 Compiler Construction* at DTU Compute - Technical University of
