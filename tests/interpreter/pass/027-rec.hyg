@@ -1,0 +1,7 @@
+// File: tests/interpreter/pass/027-rec.hyg
+// 测试递归函数语法糖
+
+rec fun factorial(n: int): int = 
+  if n < 1 then 1 else n * factorial(n);
+
+()
